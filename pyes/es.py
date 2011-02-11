@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import os
 
 __author__ = 'Alberto Paro, Robert Eanes, Matt Dennewitz'
 __all__ = ['ES', 'file_to_attachment', 'decode_json']
@@ -19,6 +20,7 @@ from StringIO import StringIO
 from functools import wraps
 from decimal import Decimal
 import traceback
+from twisted.internet import defer
 
 try:
     from connection import connect as thrift_connect
@@ -160,7 +162,7 @@ class ES(object):
         Create initial connection pool
         """
         #detect connectiontype
-        port = self.servers[0].split(":")[1]
+        port = self.servers[0].split(":")[2]
         if port.startswith("92"):
             self.connection = http_connect(self.servers, timeout=self.timeout, max_retries=self.max_retries)
             return
@@ -181,6 +183,7 @@ class ES(object):
         self._init_connection()
         return self.servers
 
+    @defer.inlineCallbacks
     def _send_request(self, method, path, body=None, params={}):
         if not path.startswith("/"):
             path = "/" + path
@@ -194,7 +197,7 @@ class ES(object):
         request = RestRequest(method=Method._NAMES_TO_VALUES[method.upper()], uri=path, parameters=params, headers={}, body=body)
         if self.dump_curl:
             self._dump_curl_request(request)
-        response = self.connection.execute(request)
+        response = yield self.connection.execute(request)
         try:
             decoded = json.loads(response.body, cls=self.decoder)
         except ValueError:
@@ -208,7 +211,7 @@ class ES(object):
                 raise pyes.exceptions.ElasticSearchException(response.body, response.status, response.body)
         if response.status != 200:
             raise_if_error(response.status, decoded)
-        return  decoded
+        defer.returnValue(decoded)
 
     def _make_path(self, path_components):
         """

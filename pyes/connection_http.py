@@ -17,6 +17,9 @@ from httplib import HTTPConnection
 from fakettypes import *
 import socket
 import sys
+from twisted.internet import defer
+from cyclone import httpclient
+
 __all__ = ['connect', 'connect_thread_local']
 
 DEFAULT_SERVER = '127.0.0.1:9200'
@@ -40,23 +43,24 @@ class ClientTransport(object):
     """Encapsulation of a client session."""
 
     def __init__(self, server, framed_transport, timeout, recycle):
-        host, port = server.split(":")
-        self.client = TimeoutHttpConnectionPool(host, port, timeout)
-        setattr(self.client, "execute", self.execute)
-        if recycle:
-            self.recycle = time.time() + recycle + random.uniform(0, recycle * 0.1)
-        else:
-            self.recycle = None
-
+        self.server = server
+        self.recycle = None
+#        self.client = TimeoutHttpConnectionPool(host, port, timeout)
+#        setattr(self.client, "execute", self.execute)
+#        if recycle:
+#            self.recycle = time.time() + recycle + random.uniform(0, recycle * 0.1)
+#        else:
+#            self.recycle = None
+    @defer.inlineCallbacks
     def execute(self, request):
         """
         Execute a request and return a response
         """
-        uri = request.uri
+        uri = "%s%s" % (self.server, request.uri)
         if request.parameters:
             uri += '?' + urllib.urlencode(request.parameters)
-        response = self.client.urlopen(Method._VALUES_TO_NAMES[request.method], uri, body=request.body, headers=request.headers)    
-        return RestResponse(status=response.status, body=response.data, headers=response.headers)
+        response = yield httpclient.fetch(uri, postdata=request.body, headers=request.headers, method=Method._VALUES_TO_NAMES[request.method])
+        defer.returnValue(RestResponse(status=response.code, body=response.body, headers=response.headers))
 
 def connect(servers=None, framed_transport=False, timeout=None,
             retry_time=60, recycle=None, round_robin=None, max_retries=3):
@@ -104,8 +108,9 @@ def connect(servers=None, framed_transport=False, timeout=None,
 
     if servers is None:
         servers = [DEFAULT_SERVER]
-    return ThreadLocalConnection(servers, framed_transport, timeout,
-                                 retry_time, recycle, max_retries=max_retries)
+    return ClientTransport(servers[0], framed_transport, timeout, recycle)
+#    return ThreadLocalConnection(servers, framed_transport, timeout,
+#                                 retry_time, recycle, max_retries=max_retries)
 
 connect_thread_local = connect
 
